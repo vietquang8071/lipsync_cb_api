@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+!app/.env.example
+
+# Logs and debug dumps
+logs/
+*.log
+log.txt
+headers.txt
+
+# Runtime storage / generated jobs
+storage/
+app/output/
+output/
+outputs/
+
+# Generated media
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# Keep source examples if needed, but ignore generated sample results
+app/thirdparty/SoulX_FlashHead/sample_results/
+app/thirdparty/SoulX_FlashHead/benchmark_logs/
+
+# Large model/checkpoint artifacts
+app/thirdparty/SoulX_FlashHead/models/
+app/thirdparty/SoulX_FlashHead/flashhead_models.tar
+*.ckpt
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.onnx
+
+# Hugging Face / model cache
+.cache/
+**/.cache/
+huggingface/
+**/huggingface/
+
+# Nested git metadata from vendored repos
+app/thirdparty/SoulX_FlashHead/.git/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
