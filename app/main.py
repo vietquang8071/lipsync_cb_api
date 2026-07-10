@@ -54,13 +54,6 @@ async def lifespan(app: FastAPI):
     world_size=world_size
   )
 
-  load_on_startup=os.getenv("LOAD_MODEL_ON_STARTUP", "true").lower() =="true"
-  if load_on_startup:
-    logger.info("Loading SoulX model on startup...")
-    model.load()
-  else:
-    logger.info("SoulX model will be loaded lazily on first request")
-
   app.state.lipsync_service = LipSyncService(
     model=model,
     storage_dir=str(storage_dir),
@@ -68,14 +61,6 @@ async def lifespan(app: FastAPI):
   )
 
   logger.info("LipSync API is ready")
-
-  try:
-    yield
-  finally:
-    logger.info("Shutting down LipSync API...")
-    service = getattr(app.state, "lipsync_service", None)
-    if service is not None and service.model is not None:
-      service.model.unload()
 
 app = FastAPI(
   title="LipSync API",
@@ -97,10 +82,14 @@ async def root():
 @app.get("/health")
 async def health():
   service = getattr(app.state, "lipsync_service", None)
-  model = getattr(service, "model", None)
+  ready = service is not None
 
   return {
-      "status": "ready" if bool(getattr(model, "loaded", False)) else "not_ready",
-      "model_loaded": bool(getattr(model, "loaded", False)),
-      "model_type": getattr(model, "model_type", None),
+    "status": "ready" if ready else "not_ready",
+    "component": "api",
+    "model_type": getattr(
+        getattr(service, "model", None),
+        "model_type",
+        None,
+    ),
   }

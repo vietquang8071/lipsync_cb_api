@@ -27,18 +27,6 @@ def validate_job_id(job_id:str) -> None:
       detail="Invalid job id"
     )
 
-@router.get("/health")
-async def health_check(service=Depends(get_lipsync_service)):
-  model = getattr(service, "model", None)
-  loaded = bool(getattr(model, "loaded", False))
-
-  return {
-    "status": "ready" if loaded else "not ready",
-    "model_loaded": loaded,
-    "model_type": getattr(model, "model_type", None)
-
-  }
-
 @router.post("/generate", responses=RESPONSE_STATUS)
 async def generate_lipsync_video(
   payload: LipSyncUploadRequest=Depends(),
