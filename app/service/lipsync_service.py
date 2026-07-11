@@ -34,6 +34,8 @@ class LipSyncService:
       with output_path.open("wb") as buffer:
           shutil.copyfileobj(upload.file, buffer)
   
+  
+
   async def prepare_job(self, request: LipSyncUploadRequest) -> LipSyncJob:
     if request.options.model_type != self.model.model_type:
       raise HTTPException(

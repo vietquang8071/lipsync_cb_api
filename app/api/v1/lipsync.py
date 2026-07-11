@@ -26,6 +26,8 @@ def validate_job_id(job_id:str) -> None:
       status_code=400,
       detail="Invalid job id"
     )
+  
+  
 
 @router.post("/generate", responses=RESPONSE_STATUS)
 async def generate_lipsync_video(

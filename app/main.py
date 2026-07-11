@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI):
   )
 
   logger.info("LipSync API is ready")
+  
+  try:
+    yield
+  finally:
+    logger.info("Shutting down LipSync API...")
 
 app = FastAPI(
   title="LipSync API",
