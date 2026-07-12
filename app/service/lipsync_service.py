@@ -1,18 +1,13 @@
-import asyncio
 import shutil
-import subprocess
-from collections import deque
 from pathlib import Path
 from uuid import uuid4
-import imageio
-import librosa
-import numpy as np
 from fastapi import HTTPException, UploadFile
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 from app.schemas.request import LipSyncUploadRequest, LipSyncJob
 from app.model.soulX import SoulXModel
 from app.utils import save_video
+
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a"}
 
@@ -20,12 +15,14 @@ class LipSyncService:
   def __init__(self,
                model: SoulXModel,
                storage_dir: str="storage/lipsync",
-               use_face_crop: bool = True
+               seed: int=42,
+               use_face_crop: bool = False,
                ):
     self.model = model
     self.storage_dir = Path(storage_dir)
     self.storage_dir.mkdir(parents=True, exist_ok=True)
     self.use_face_crop=use_face_crop
+    self.seed = seed
 
   @staticmethod
   def _copy_upload_to_path(upload: UploadFile, output_path: Path) -> None:
@@ -37,17 +34,6 @@ class LipSyncService:
   
 
   async def prepare_job(self, request: LipSyncUploadRequest) -> LipSyncJob:
-    if request.options.model_type != self.model.model_type:
-      raise HTTPException(
-        status_code=400,
-        detail=f"Loaded model is {self.model.model_type} while request uses {request.options.model_type}.",
-      )
-    
-    if request.options.audio_encode_mode != "stream":
-      raise HTTPException(
-        status_code=400,
-        detail="Only stream audio_encode_mode is supported by this service"
-      )
     job_id = uuid4().hex
     job_dir = self.storage_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +59,6 @@ class LipSyncService:
       image_path=str(image_path),
       audio_path=str(audio_path),
       output_path=str(output_path),
-      options=request.options
     )
   
   async def generate_job(self, job:LipSyncJob) -> Path:
@@ -87,8 +72,8 @@ class LipSyncService:
         image_path,
         audio_path,
         output_path,
-        job.options.seed,
-        job.options.use_face_crop,
+        self.seed,
+        self.use_face_crop,
       )
     except HTTPException:
       raise

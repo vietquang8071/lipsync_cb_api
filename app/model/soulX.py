@@ -43,7 +43,7 @@ class SoulXModel():
     self.cpkt_dir = cpkt_dir
     self.wav2vec_dir = wav2vec_dir
     self.model_type = model_type
-    self.config_path = config_path or str(SOULX_DIR / "flash_head/configs/infer_params.yaml")
+    self.config_path = config_path
     self.world_size = world_size
 
     self.pipeline = None

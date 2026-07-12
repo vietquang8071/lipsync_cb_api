@@ -18,6 +18,12 @@ DEFAULT_CONFIG_PATH = SOULX_DIR / "flash_head" / "configs" / "infer_params.yaml"
 DEFAULT_STORAGE_DIR = APP_DIR.parent / "storage" / "lipsync"
 DEFAULT_LOG_DIR = APP_DIR.parent / "logs"
 
+LIPSYNC_SEED = os.getenv("SEED", 42)
+MODEL_TYPE = os.getenv("MODEL_TYPE", "lite")
+AUDIO_ENCODE_MODE = os.getenv("AUDIO_ENCODE_MODE", "stream")
+USE_FACE_CROP = os.getenv("USE_FACE_CROP", "False")
+WORLD_SIZE = os.getenv("WORLD_SIZE", 1)
+
 def configure_logging() -> None:
   log_dir = Path(os.getenv("LIPSYNC_LOG_DIR", str(DEFAULT_LOG_DIR)))
   log_dir.mkdir(parents=True, exist_ok=True)
@@ -57,7 +63,8 @@ async def lifespan(app: FastAPI):
   app.state.lipsync_service = LipSyncService(
     model=model,
     storage_dir=str(storage_dir),
-    use_face_crop=False
+    use_face_crop=USE_FACE_CROP,
+    seed=LIPSYNC_SEED
   )
 
   logger.info("LipSync API is ready")

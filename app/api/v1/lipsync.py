@@ -1,11 +1,10 @@
 from pathlib import Path
-
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from app.schemas.request import LipSyncUploadRequest
-from app.schemas.response import RESPONSE_STATUS
+from app.schemas.response import GENERATE_ERROR_RESPONSES, VIDEO_RESPONSES, LipSyncQueuedResponse
 from app.worker.lipsync_task import processing_lipsync_task
 from app.worker.celery_app import celery_app
 
@@ -29,21 +28,25 @@ def validate_job_id(job_id:str) -> None:
   
   
 
-@router.post("/generate", responses=RESPONSE_STATUS)
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED, response_model=LipSyncQueuedResponse, responses=GENERATE_ERROR_RESPONSES)
 async def generate_lipsync_video(
   payload: LipSyncUploadRequest=Depends(),
   service=Depends(get_lipsync_service),
 ):
   job = await service.prepare_job(payload)
-  task = processing_lipsync_task.delay(job.dict())
+  job_payload = (
+    job.model_dump()
+    if hasattr(job, "model_dump")
+    else job.dict()
+  )
+  task = processing_lipsync_task.delay(job_payload)
 
-  return {
-    "job_id":job.job_id,
-    "task_id":task.id,
-    "status":"queued",
-    "video_url":f"/api/v1/lipsync/jobs/{job.job_id}/video"
+  return LipSyncQueuedResponse(
+    job_id=job.job_id,
+    task_id=task.id,
+    status="queued",
+    video_url=f"/api/v1/lipsync/jobs/{job.job_id}/video")
 
-  }
 
 @router.get("/tasks/{task_id}")
 async def get_lipsync_task_status(task_id:str):
@@ -64,16 +67,19 @@ async def get_lipsync_video(
 ):
   validate_job_id(job_id)
 
-  video_path = Path(service.storage_dir) / job_id / "lipsync.mp4"
+  video_path = Path(service.storage_dir) / job_id / f"lipsync.mp4"
 
-  if not video_path.exists():
-    raise HTTPException(
-      status_code=404,
-      detail="LipSync video not found"
-    )
-  
+  if (
+      not video_path.is_file()
+      or video_path.stat().st_size == 0
+  ):
+      raise HTTPException(
+          status_code=404,
+          detail="LipSync video not found or not completed",
+      )
+
   return FileResponse(
-    path=str(video_path),
-    media_type="video/mp4",
-    filename="lipsync.mp4"
+      path=str(video_path),
+      media_type="video/mp4",
+      filename=f"lipsync{job_id}.mp4",
   )

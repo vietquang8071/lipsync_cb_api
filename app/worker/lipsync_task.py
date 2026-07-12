@@ -47,7 +47,7 @@ def _get_service() -> LipSyncService:
       "LIPSYNC_STORAGE_DIR",
       str(PROJECT_DIR / "storage" / "lipsync"),
     ),
-    use_face_crop=False
+    use_face_crop=os.getenv("USE_FACE_CROP", False)
   )
 
   return _service
@@ -72,8 +72,8 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
       Path(job.image_path),
       Path(job.audio_path),
       output_path=output_path,
-      seed=job.options.seed,
-      use_face_crop=job.options.use_face_crop
+      seed=service.seed,
+      use_face_crop=service.use_face_crop
     )
 
     if not output_path.exists():
