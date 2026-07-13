@@ -5,24 +5,16 @@ from fastapi import HTTPException, UploadFile
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 from app.schemas.request import LipSyncUploadRequest, LipSyncJob
-from app.model.soulX import SoulXModel
-from app.utils import save_video
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a"}
 
 class LipSyncService:
   def __init__(self,
-               model: SoulXModel,
                storage_dir: str="storage/lipsync",
-               seed: int=42,
-               use_face_crop: bool = False,
                ):
-    self.model = model
     self.storage_dir = Path(storage_dir)
     self.storage_dir.mkdir(parents=True, exist_ok=True)
-    self.use_face_crop=use_face_crop
-    self.seed = seed
 
   @staticmethod
   def _copy_upload_to_path(upload: UploadFile, output_path: Path) -> None:
@@ -60,41 +52,8 @@ class LipSyncService:
       audio_path=str(audio_path),
       output_path=str(output_path),
     )
-  
-  async def generate_job(self, job:LipSyncJob) -> Path:
-    output_path = Path(job.output_path)
-    image_path = Path(job.image_path)
-    audio_path = Path(job.audio_path)
 
-    try:
-      await run_in_threadpool(
-        self.model.generate_video,
-        image_path,
-        audio_path,
-        output_path,
-        self.seed,
-        self.use_face_crop,
-      )
-    except HTTPException:
-      raise
-    except Exception as exc:
-      logger.exception("LipSync generation failed")
-      raise HTTPException(
-        status_code=500,
-        detail=f"LipSync generation failed: {exc}"
-      ) from exc
-    
-    if not output_path.exists():
-      raise HTTPException(
-        status_code=500,
-        detail="output video was not created"
-      )
-    return output_path
 
-  async def generate(self, request: LipSyncUploadRequest) -> Path:
-    job = await self.prepare_job(request)
-    return await self.generate_job(job)
-  
   async def _save_upload(
       self,
       upload: UploadFile,

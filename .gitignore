@@ -73,3 +73,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+docker-compose.yaml
+Dockerfile

@@ -7,24 +7,23 @@ from loguru import logger
 from app.model.soulX import SoulXModel
 from app.schemas.request import LipSyncJob
 from app.worker.celery_app import celery_app
-from app.service.lipsync_service import LipSyncService
 
 APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = APP_DIR.parent
 SOULX_DIR = APP_DIR / "thirdparty" / "SoulX_FlashHead"
 
-_service: LipSyncService | None = None
+_model: SoulXModel | None = None
 
 def _dump_job(job: LipSyncJob) -> dict:
   return job.model_dump() if hasattr(job, "model_dump") else job.dict()
 
-def _get_service() -> LipSyncService:
-  global _service
-  if _service is not None:
-    return _service
+def _get_model() -> SoulXModel:
+  global _model
+  if _model is not None:
+    return _model
   
 
-  model = SoulXModel(
+  _model = SoulXModel(
     cpkt_dir=os.getenv(
         "SOULX_CKPT_DIR",
         str(SOULX_DIR / "models" / "SoulX-FlashHead-1_3B"),
@@ -40,17 +39,7 @@ def _get_service() -> LipSyncService:
     ),
     world_size=int(os.getenv("WORLD_SIZE", "1")),
   )
-
-  _service = LipSyncService(
-    model=model,
-    storage_dir=os.getenv(
-      "LIPSYNC_STORAGE_DIR",
-      str(PROJECT_DIR / "storage" / "lipsync"),
-    ),
-    use_face_crop=os.getenv("USE_FACE_CROP", False)
-  )
-
-  return _service
+  return _model
 
 @celery_app.task(name="process_lipsync_task", bind=True, max_retries=2)
 def processing_lipsync_task(self, job_payload:dict) -> dict:
@@ -64,16 +53,16 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
   self.update_state(state="PROGRESS", meta=_dump_job(job))
 
   try:
-    service = _get_service()
+    model=_get_model()
     output_path = Path(job.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    service.model.generate_video(
+    model.generate_video(
       Path(job.image_path),
       Path(job.audio_path),
       output_path=output_path,
-      seed=service.seed,
-      use_face_crop=service.use_face_crop
+      seed=int(os.getenv("SEED", 42)),
+      use_face_crop=os.getenv("USE_FACE_CROP", default=False)
     )
 
     if not output_path.exists():

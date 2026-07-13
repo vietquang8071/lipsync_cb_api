@@ -44,27 +44,10 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   logger.info("Starting LipSync API...")
-  model_type = os.getenv("SOULX_MODEL_TYPE", "lite")
-  world_size = int(os.getenv("WORLD_SIZE", 1))
-
-  ckpt_dir = Path(os.getenv("SOULX_CKPT_DIR", str(DEFAULT_CKPT_DIR)))
-  wav2vec_dir = Path(os.getenv("SOULX_WAV2VEC_DIR", str(DEFAULT_WAV2VEC_DIR)))
-  config_path = Path(os.getenv("SOULX_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
   storage_dir = Path(os.getenv("LIPSYNC_STORAGE_DIR", str(DEFAULT_STORAGE_DIR)))
 
-  model = SoulXModel(
-    cpkt_dir=str(ckpt_dir),
-    wav2vec_dir=str(wav2vec_dir),
-    model_type=model_type,
-    config_path=str(config_path),
-    world_size=world_size
-  )
-
   app.state.lipsync_service = LipSyncService(
-    model=model,
     storage_dir=str(storage_dir),
-    use_face_crop=USE_FACE_CROP,
-    seed=LIPSYNC_SEED
   )
 
   logger.info("LipSync API is ready")
@@ -93,15 +76,16 @@ async def root():
 
 @app.get("/health")
 async def health():
-  service = getattr(app.state, "lipsync_service", None)
-  ready = service is not None
-
+  service = getattr(
+    app.state,
+    "lipsync_service",
+    None,
+  )
+  ready = (
+    service is not None
+    and service.storage_dir.is_dir()
+  )
   return {
     "status": "ready" if ready else "not_ready",
     "component": "api",
-    "model_type": getattr(
-        getattr(service, "model", None),
-        "model_type",
-        None,
-    ),
   }
