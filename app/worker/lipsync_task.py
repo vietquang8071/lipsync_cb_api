@@ -5,7 +5,7 @@ from time import time
 from loguru import logger
 
 from app.model.soulX import SoulXModel
-from app.schemas.request import LipSyncJob
+from app.schemas.job import LipSyncJob
 from app.worker.celery_app import celery_app
 
 APP_DIR = Path(__file__).resolve().parents[1]
@@ -56,7 +56,7 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
     model=_get_model()
     output_path = Path(job.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
+    
     model.generate_video(
       Path(job.image_path),
       Path(job.audio_path),

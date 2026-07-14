@@ -4,7 +4,7 @@ from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 
-from app.schemas.request import LipSyncUploadRequest
+from app.schemas.request import LipSyncPathRequest
 from app.schemas.response import GENERATE_ERROR_RESPONSES, VIDEO_RESPONSES, LipSyncQueuedResponse
 from app.worker.lipsync_task import processing_lipsync_task
 from app.worker.celery_app import celery_app
@@ -30,7 +30,7 @@ def validate_job_id(job_id:str) -> None:
 
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED, response_model=LipSyncQueuedResponse, responses=GENERATE_ERROR_RESPONSES)
 async def generate_lipsync_video(
-  payload: LipSyncUploadRequest=Depends(),
+  payload: LipSyncPathRequest,
   service=Depends(get_lipsync_service),
 ):
   job = await service.prepare_job(payload)
@@ -45,7 +45,8 @@ async def generate_lipsync_video(
     job_id=job.job_id,
     task_id=task.id,
     status="queued",
-    video_url=f"/api/v1/lipsync/jobs/{job.job_id}/video")
+    video_url=f"/api/v1/lipsync/jobs/{job.job_id}/video"
+  )
 
 
 @router.get("/tasks/{task_id}")
