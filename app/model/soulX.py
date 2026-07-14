@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from loguru import logger
-from app.utils import save_video
+from app.utils import save_video, decode_audio_buffer, save_video_with_waveform
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
@@ -263,7 +263,89 @@ class SoulXModel():
         fps=tgt_fps
       )
 
+  def generate_frames_from_audio_buffer(self,
+      image_path:Path,
+      audio_buffer: bytes | bytearray | memoryview,
+      output_path:Path,
+      seed:int,
+      use_face_crop:bool
+  ):
+    """Đưa audio buffer vào SoulX, sau đó save thành video."""
+    with self._lock:
+      if not self.loaded:
+        self.load()
 
+      self._prepare_base_data(
+        cond_image_path_or_dir=str(image_path),
+        base_seed=seed,
+        use_face_crop=use_face_crop,
+      )
+      params = self._get_infer_params()
+
+      sample_rate = params["sample_rate"]
+      fps = params["tgt_fps"]
+      frame_num = params["frame_num"]
+      motion_frames_num = params["motion_frames_num"]
+      cached_audio_duration = params["cached_audio_duration"]
+
+      slice_len = frame_num - motion_frames_num
+      audio_slice_len = slice_len * sample_rate // fps
+
+      # bytes -> mono float32 waveform 16 kHz
+      speech_array = decode_audio_buffer(
+          audio_buffer,
+          sample_rate=sample_rate,
+      )
+
+      # Pad chunk cuối bằng silence
+      pad_length = (-len(speech_array)) % audio_slice_len
+      if pad_length:
+          speech_array = np.pad(speech_array, (0, pad_length))
+
+      audio_chunks = speech_array.reshape(-1, audio_slice_len)
+
+      cached_audio_length = int(sample_rate * cached_audio_duration)
+      audio_end_idx = int(cached_audio_duration * fps)
+      audio_start_idx = audio_end_idx - frame_num
+
+      audio_cache = deque(
+          [0.0] * cached_audio_length,
+          maxlen=cached_audio_length,
+      )
+
+      generated_frames = []
+
+      with torch.inference_mode():
+          for speech_chunk in audio_chunks:
+              audio_cache.extend(speech_chunk)
+
+              audio_array = np.fromiter(
+                  audio_cache,
+                  dtype=np.float32,
+                  count=cached_audio_length,
+              )
+
+              audio_embedding = self._get_audio_embedding(
+                  audio_array,
+                  audio_start_idx,
+                  audio_end_idx,
+              )
+
+              video = self.infer(audio_embedding=audio_embedding)
+
+              # Bỏ các frame chuyển động được cache từ chunk trước
+              video = video[motion_frames_num:]
+              generated_frames.append(video.cpu())
+
+      if not generated_frames:
+          raise RuntimeError("SoulX did not generate any frames")
+
+      save_video_with_waveform(
+        frames_list=generated_frames,
+        video_path=output_path,
+        waveform=speech_array,
+        fps=fps
+      )
   def unload(self):
     """
     Giải phóng model khỏi GPU
