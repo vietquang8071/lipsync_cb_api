@@ -32,9 +32,7 @@ class LipSyncService:
     
     image_path = self._resolve_image_path(request.image_id)
     audio_path = self._validate_audio_path(request.audio_path)
-
-
-
+    
     output_path = job_dir/"lipsync.mp4"
 
     return LipSyncJob(

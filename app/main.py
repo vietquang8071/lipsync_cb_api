@@ -8,7 +8,7 @@ from loguru import logger
 from app.api.v1.lipsync import router as lipsync_router
 from app.model.soulX import SoulXModel
 from app.service.lipsync_service import LipSyncService
-
+from app.logging_config import configure_loguru, add_request_logging_middleware
 APP_DIR = Path(__file__).resolve().parent
 SOULX_DIR = APP_DIR / "thirdparty" / "SoulX_FlashHead"
 
@@ -24,22 +24,7 @@ AUDIO_ENCODE_MODE = os.getenv("AUDIO_ENCODE_MODE", "stream")
 USE_FACE_CROP = os.getenv("USE_FACE_CROP", "False")
 WORLD_SIZE = os.getenv("WORLD_SIZE", 1)
 
-def configure_logging() -> None:
-  log_dir = Path(os.getenv("LIPSYNC_LOG_DIR", str(DEFAULT_LOG_DIR)))
-  log_dir.mkdir(parents=True, exist_ok=True)
-
-  logger.add(
-    log_dir / "lipsync_api.log",
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    rotation=os.getenv("LOG_ROTATION", "100 MB"),
-    retention=os.getenv("LOG_RETENTION", "14 days"),
-    compression=os.getenv("LOG_COMPRESSION", "zip"),
-    enqueue=True,
-    backtrace=True,
-    diagnose=False,
-  )
-
-configure_logging()
+configure_loguru(str("api/lipsync_api.log"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,6 +49,7 @@ app = FastAPI(
   lifespan=lifespan
 )
 
+add_request_logging_middleware(app)
 app.include_router(lipsync_router, prefix="/api/v1")
 
 @app.get("/")

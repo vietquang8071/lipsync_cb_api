@@ -103,10 +103,32 @@ class SoulXModel():
         self.infer_params["sample_steps"]=4
       
       self.loaded=True
-      logger.info("SoulX-FlashHead loaded successfully")
+      # try:
+      #   self.warmup_load(
+      #     audio_warmup="/warmup/warmup.wav",
+      #     image_warmup="/warmup/warmup.jpg",
+      #     output_path="/warmup/warmup.mp4"
+      #   )
+      # except Exception:
+      #   self.loaded=False
+      #   logger.error("SoulX-FlashHead warmed up unsuccessfully")
+      #   raise
+      # logger.info("SoulX-FlashHead loaded successfully")
 
       return self
   
+  def warmup_load(
+      self,
+      audio_warmup: str,
+      image_warmup: str,
+      output_path: str,
+  ):
+    self.generate_video(image_path=image_warmup,
+                        audio_path=audio_warmup,
+                        output_path=output_path,
+                        seed=42,
+                        use_face_crop=False)
+
   def _prepare_base_data(
       self,
       cond_image_path_or_dir:str,
