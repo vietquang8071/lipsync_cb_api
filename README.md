@@ -9,10 +9,20 @@ conda activate flashhead
 ```bash
 pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 ```
+If your NVIDIA driver only supports CUDA version 12.8, using this:
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+
+
+To check CUDA, using this command:
+ ```bash
+ nvidia-smi
+ ```
 #### 3. Install other dependencies
 ```bash
 pip install -r requirements.txt
+pip install fastapi celery[redis]
 ```
+
 #### 4. FlashAttention installation:
 ```bash
 pip install ninja
