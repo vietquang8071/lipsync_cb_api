@@ -10,8 +10,9 @@ conda activate flashhead
 pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 ```
 If your NVIDIA driver only supports CUDA version 12.8, using this:
+```bash
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
-
+```
 
 To check CUDA, using this command:
  ```bash
@@ -59,6 +60,7 @@ Only download lite version
 
 After download, put the weight into app/thirdparty/SoulX_FlashHead/models/ like this:
 
+```bash
 app/thirdparty/SoulX_FlashHead/models/
 ├── SoulX-FlashHead-1_3B/
 │   ├── Model_Lite/
@@ -66,6 +68,7 @@ app/thirdparty/SoulX_FlashHead/models/
 └── wav2vec2-base-960h/
     ├── config.json
     └── model.safetensors
+```
 
 ```bash
 # If you are in china mainland, run this first: export HF_ENDPOINT=https://hf-mirror.com
