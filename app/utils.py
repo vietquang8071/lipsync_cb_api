@@ -356,7 +356,7 @@ def decode_audio_buffer(
     )
 
     if process.returncode != 0:
-        error = process.stderr.decode("utf-8", error="replace")
+        error = process.stderr.decode("utf-8", errors="replace")
         raise ValueError(f"Cannot decode audio buffer: {error}")
     waveform = np.frombuffer(process.stdout, dtype=np.float32).copy()
 

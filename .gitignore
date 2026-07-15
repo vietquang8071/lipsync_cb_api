@@ -74,7 +74,5 @@ Thumbs.db
 *.swp
 *.swo
 
-docker-compose.yaml
-Dockerfile
 /images
-/script
+/scripts

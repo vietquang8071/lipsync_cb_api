@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -8,9 +9,16 @@ from starlette.concurrency import run_in_threadpool
 from app.schemas.request import LipSyncPathRequest
 from app.schemas.job import LipSyncJob
 
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a"}
-IMAGE_STORAGE = os.getenv("IMAGE_STORAGE", "images")
+IMAGE_STORAGE = Path(
+    os.getenv("IMAGE_STORAGE", str(PROJECT_DIR / "images"))
+).expanduser().resolve()
+AUDIO_STORAGE = Path(
+    os.getenv("AUDIO_STORAGE", "/dev/shm/audio")
+).expanduser().resolve()
 class LipSyncService:
 
     """
@@ -73,13 +81,13 @@ class LipSyncService:
             LipSyncJob chứa thông tin đầy đủ để worker xử lý job lipsync.
         """
 
+        image_path = self._resolve_image_path(request.image_id)
+        audio_path = self._validate_audio_path(request.audio_path)
+
         job_id = uuid4().hex
         job_dir = self.storage_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        
-        image_path = self._resolve_image_path(request.image_id)
-        audio_path = self._validate_audio_path(request.audio_path)
-        
+                
         output_path = job_dir/"lipsync.mp4"
 
         return LipSyncJob(
@@ -90,24 +98,15 @@ class LipSyncService:
         )
 
     def _validate_audio_path(self, value: str) -> Path:
-        """
-        Kiểm tra và chuẩn hóa đường dẫn file âm thanh đầu vào.
+        audio_path = Path(value).expanduser().resolve()
 
-        Hàm này chuyển đường dẫn audio sang dạng tuyệt đối, kiểm tra file có tồn
-        tại hay không và kiểm tra phần mở rộng có thuộc nhóm định dạng được hỗ
-        trợ.
-        Nếu file không tồn tại hoặc không đúng định dạng, hàm sẽ raise
-        HTTPException.
+        # Chỉ cho phép đọc file bên trong /dev/shm/audio
+        if not audio_path.is_relative_to(AUDIO_STORAGE):
+            raise HTTPException(
+                status_code=400,
+                detail="Audio path is outside AUDIO_STORAGE",
+            )
 
-        Tham số:
-          value: Đường dẫn tới file âm thanh đầu vào.
-
-        Trả về:
-          Path tuyệt đối tới file âm thanh hợp lệ.
-        """
-
-
-        audio_path = Path(value).resolve()
         if not audio_path.is_file():
             raise HTTPException(
                 status_code=404,
@@ -118,6 +117,12 @@ class LipSyncService:
             raise HTTPException(
                 status_code=415,
                 detail=f"Unsupported audio type: {audio_path.suffix}",
+            )
+
+        if audio_path.stat().st_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Audio file is empty",
             )
 
         return audio_path
@@ -138,11 +143,17 @@ class LipSyncService:
         Trả về:
           Path tới file ảnh tương ứng với image_id.
         """
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", image_id):
+            raise HTTPException(status_code=400, detail="Invalid image_id")
 
         image_storage = Path(IMAGE_STORAGE)
-
+  
+        
         for suffix in IMAGE_SUFFIXES:
-            candidate = image_storage / f"{image_id}{suffix}"
+            candidate = (image_storage / f"{image_id}{suffix}").resolve()
+
+            if not candidate.is_relative_to(image_storage):
+                raise HTTPException(status_code=400, detail="Invalid image path")
 
             if candidate.is_file():
                 return candidate

@@ -1,0 +1,142 @@
+name: lipsync-cb
+
+x-build-common: &build-common
+  context: .
+  dockerfile: Dockerfile
+  args:
+    CUDA_VERSION: ${CUDA_VERSION:-12.1.1}
+    PYTORCH_VERSION: ${PYTORCH_VERSION:-2.5.1}
+    TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.20.1}
+    XFORMERS_VERSION: ${XFORMERS_VERSION:-0.0.28.post3}
+    PYTORCH_CUDA_INDEX: ${PYTORCH_CUDA_INDEX:-cu121}
+
+x-app-environment: &app-environment
+  CELERY_BROKER_URL: redis://redis:6379/10
+  CELERY_RESULT_BACKEND: redis://redis:6379/11
+  LIPSYNC_STORAGE_DIR: /opt/lipsync/storage/lipsync
+  LIPSYNC_LOG_DIR: /opt/lipsync/logs
+  IMAGE_STORAGE: /opt/lipsync/storage/images
+  AUDIO_STORAGE: /dev/shm/audio
+  SOULX_CKPT_DIR: /opt/lipsync/app/thirdparty/SoulX_FlashHead/models/SoulX-FlashHead-1_3B
+  SOULX_WAV2VEC_DIR: /opt/lipsync/app/thirdparty/SoulX_FlashHead/models/wav2vec2-base-960h
+  SOULX_CONFIG_PATH: /opt/lipsync/app/thirdparty/SoulX_FlashHead/flash_head/configs/infer_params.yaml
+  SOULX_MODEL_TYPE: ${SOULX_MODEL_TYPE:-lite}
+  SEED: ${SEED:-42}
+  USE_FACE_CROP: ${USE_FACE_CROP:-false}
+  AUDIO_ENCODE_MODE: ${AUDIO_ENCODE_MODE:-stream}
+  WORLD_SIZE: ${WORLD_SIZE:-1}
+  PYTHONUNBUFFERED: "1"
+
+x-api-volumes: &api-volumes
+  - ./storage:/opt/lipsync/storage
+  - ./logs:/opt/lipsync/logs
+  - ./images:/opt/lipsync/storage/images:ro
+  - /dev/shm/audio:/dev/shm/audio:ro
+  - ${SOULX_MODELS_DIR:-./app/thirdparty/SoulX_FlashHead/models}:/opt/lipsync/app/thirdparty/SoulX_FlashHead/models:ro
+
+x-worker-volumes: &worker-volumes
+  - ./storage:/opt/lipsync/storage
+  - ./logs:/opt/lipsync/logs
+  - ./images:/opt/lipsync/storage/images:ro
+  - /dev/shm/audio:/dev/shm/audio:rw
+  - ${SOULX_MODELS_DIR:-./app/thirdparty/SoulX_FlashHead/models}:/opt/lipsync/app/thirdparty/SoulX_FlashHead/models:ro
+
+x-app-common: &app-common
+  image: lipsync-cb-api:latest
+  build: *build-common
+  restart: unless-stopped
+  environment:
+    <<: *app-environment
+
+x-worker-common: &worker-common
+  <<: *app-common
+  volumes: *worker-volumes
+  healthcheck:
+    disable: true
+  init: true
+  shm_size: 8gb
+  depends_on:
+    redis:
+      condition: service_healthy
+  environment:
+    <<: *app-environment
+    CUDA_VISIBLE_DEVICES: "0"
+    NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["1"]
+            capabilities: [gpu]
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    <<: *app-common
+    volumes: *api-volumes
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8010}:8010"
+
+  worker-1:
+    <<: *worker-common
+    environment:
+      <<: *app-environment
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      WORKER_LOG_FILE: worker/worker-1-loguru.log
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -o pipefail
+        mkdir -p /opt/lipsync/logs/worker
+        python3 -m celery \
+          -A app.worker.celery_app.celery_app \
+          worker \
+          --loglevel=info \
+          --pool=solo \
+          --concurrency=1 \
+          --prefetch-multiplier=1 \
+          --hostname=worker-1@%h \
+          2>&1 | tee -a /opt/lipsync/logs/worker/worker-1-terminal.log
+
+  # worker-2:
+  #   <<: *worker-common
+  #   environment:
+  #     <<: *app-environment
+  #     CUDA_VISIBLE_DEVICES: "0"
+  #     NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  #     WORKER_LOG_FILE: worker/worker-2-loguru.log
+  #   command:
+  #     - /bin/bash
+  #     - -lc
+  #     - |
+  #       set -o pipefail
+  #       mkdir -p /opt/lipsync/logs/worker
+  #       python3 -m celery \
+  #         -A app.worker.celery_app.celery_app \
+  #         worker \
+  #         --loglevel=info \
+  #         --pool=solo \
+  #         --concurrency=1 \
+  #         --prefetch-multiplier=1 \
+  #         --hostname=worker-2@%h \
+  #         2>&1 | tee -a /opt/lipsync/logs/worker/worker-2-terminal.log
+
+volumes:
+  redis-data:

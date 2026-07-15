@@ -124,8 +124,19 @@ async def get_lipsync_task_status(task_id:str):
     "task_id":task_id,
     "state": result.state,
   }
-  if result.info:
-    response["meta"] = result.info
+  info = result.info
+  if isinstance(info, BaseException):
+    response["meta"] = {
+      "status":{
+        "failed"
+        if result.state == "FAILURE"
+        else "retry"
+      },
+      "error_type": type(info).__name__,
+      "error": str(info)
+    }
+  elif info is not None:
+    response["meta"] = info
   return response
 
 

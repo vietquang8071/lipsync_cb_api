@@ -15,11 +15,9 @@ gradio==5.50.0
 xfuser>=0.4.3
 pyloudnorm
 decord
-xformers==0.0.28.post3
 librosa
 mediapipe==0.10.9
 flask
-nvidia-nccl-cu12==2.21.5
 fastapi
 uvicorn
 celery[redis]

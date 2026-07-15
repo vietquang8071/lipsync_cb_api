@@ -1,0 +1,10 @@
+.git/
+.env
+.env.*
+logs/
+storage/
+images/
+scripts/
+__pycache__/
+*.pyc
+app/thirdparty/SoulX_FlashHead/models/

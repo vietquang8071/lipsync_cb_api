@@ -7,11 +7,290 @@ from loguru import logger
 from app.model.soulX import SoulXModel
 from app.schemas.job import LipSyncJob
 from app.worker.celery_app import celery_app
+from app.service.lipsync_service import AUDIO_STORAGE
 APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = APP_DIR.parent
 SOULX_DIR = APP_DIR / "thirdparty" / "SoulX_FlashHead"
 
 _model: SoulXModel | None = None
+
+
+def _delete_job_audio(
+    audio_path: str | Path,
+) -> bool:
+    path = Path(audio_path).expanduser().resolve()
+
+    # Không bao giờ xóa file ngoài /dev/shm/audio.
+    if not path.is_relative_to(AUDIO_STORAGE):
+        logger.error(
+            "Refusing to delete audio outside AUDIO_STORAGE; "
+            "audio_path={}; audio_storage={}",
+            path,
+            AUDIO_STORAGE,
+        )
+        return False
+
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        # Cleanup thất bại không nên biến một job đã generate
+        # thành job failed và chạy lại toàn bộ inference.
+        logger.exception(
+            "Failed to delete job audio; audio_path={}",
+            path,
+        )
+        return False
+
+    logger.info(
+        "Job audio deleted; audio_path={}",
+        path,
+    )
+    return True
+
+
+def _resolve_required_directory(
+    env_name: str,
+    default: Path,
+) -> Path:
+    raw_value = os.getenv(env_name)
+    path = Path(raw_value) if raw_value else default
+
+    path = path.expanduser()
+
+    if not path.is_absolute():
+        raise RuntimeError(
+            f"{env_name} must be an absolute path: {path}"
+        )
+
+    try:
+        path = path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"{env_name} directory not found: {path}"
+        ) from exc
+
+    if not path.is_dir():
+        raise RuntimeError(
+            f"{env_name} is not a directory: {path}"
+        )
+
+    if not os.access(path, os.R_OK):
+        raise RuntimeError(
+            f"{env_name} is not readable: {path}"
+        )
+
+    return path
+
+
+def _resolve_required_file(
+    env_name: str,
+    default: Path,
+) -> Path:
+    raw_value = os.getenv(env_name)
+    path = Path(raw_value) if raw_value else default
+
+    path = path.expanduser()
+
+    if not path.is_absolute():
+        raise RuntimeError(
+            f"{env_name} must be an absolute path: {path}"
+        )
+
+    try:
+        path = path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"{env_name} file not found: {path}"
+        ) from exc
+
+    if not path.is_file():
+        raise RuntimeError(
+            f"{env_name} is not a file: {path}"
+        )
+
+    if not os.access(path, os.R_OK):
+        raise RuntimeError(
+            f"{env_name} is not readable: {path}"
+        )
+
+    return path
+
+
+def _require_file(path: Path, label: str) -> None:
+    if not path.is_file():
+        raise RuntimeError(
+            f"{label} not found: {path}"
+        )
+
+    if not os.access(path, os.R_OK):
+        raise RuntimeError(
+            f"{label} is not readable: {path}"
+        )
+
+
+def _require_weights(
+    directory: Path,
+    label: str,
+) -> None:
+    patterns = (
+        "*.safetensors",
+        "*.bin",
+        "*.pth",
+    )
+
+    has_weights = any(
+        path.is_file()
+        for pattern in patterns
+        for path in directory.glob(pattern)
+    )
+
+    if not has_weights:
+        raise RuntimeError(
+            f"{label} weights not found in: {directory}"
+        )
+
+def validate_model_configuration() -> tuple[
+    Path,
+    Path,
+    Path,
+    str,
+]:
+    checkpoint_dir = _resolve_required_directory(
+        "SOULX_CKPT_DIR",
+        SOULX_DIR / "models" / "SoulX-FlashHead-1_3B",
+    )
+
+    wav2vec_dir = _resolve_required_directory(
+        "SOULX_WAV2VEC_DIR",
+        SOULX_DIR / "models" / "wav2vec2-base-960h",
+    )
+
+    config_path = _resolve_required_file(
+        "SOULX_CONFIG_PATH",
+        SOULX_DIR / "flash_head" / "configs" / "infer_params.yaml",
+    )
+
+    model_type = (
+        os.getenv("SOULX_MODEL_TYPE", "lite")
+        .strip()
+        .lower()
+    )
+
+    if model_type not in {"lite", "pro", "pretrained"}:
+        raise RuntimeError(
+            "SOULX_MODEL_TYPE must be one of: "
+            "lite, pro, pretrained"
+        )
+
+    if model_type == "lite":
+        model_dir = checkpoint_dir / "Model_Lite"
+        vae_dir = checkpoint_dir / "VAE_LTX"
+
+        if not model_dir.is_dir():
+            raise RuntimeError(
+                f"Model_Lite directory not found: {model_dir}"
+            )
+
+        if not vae_dir.is_dir():
+            raise RuntimeError(
+                f"VAE_LTX directory not found: {vae_dir}"
+            )
+
+        _require_file(
+            model_dir / "config.json",
+            "Model Lite config",
+        )
+        _require_weights(
+            model_dir,
+            "Model Lite",
+        )
+
+        _require_file(
+            vae_dir / "config.json",
+            "VAE LTX config",
+        )
+        _require_weights(
+            vae_dir,
+            "VAE LTX",
+        )
+
+    elif model_type == "pro":
+        model_dir = checkpoint_dir / "Model_Pro"
+        vae_path = (
+            checkpoint_dir
+            / "VAE_Wan"
+            / "Wan2.1_VAE.pth"
+        )
+
+        if not model_dir.is_dir():
+            raise RuntimeError(
+                f"Model_Pro directory not found: {model_dir}"
+            )
+
+        _require_file(
+            model_dir / "config.json",
+            "Model Pro config",
+        )
+        _require_weights(
+            model_dir,
+            "Model Pro",
+        )
+        _require_file(
+            vae_path,
+            "Wan VAE weights",
+        )
+
+    else:
+        model_dir = checkpoint_dir / "teacher"
+        vae_path = (
+            checkpoint_dir
+            / "VAE_Wan"
+            / "Wan2.1_VAE.pth"
+        )
+
+        if not model_dir.is_dir():
+            raise RuntimeError(
+                f"Teacher model directory not found: {model_dir}"
+            )
+
+        _require_file(
+            model_dir / "config.json",
+            "Teacher model config",
+        )
+        _require_weights(
+            model_dir,
+            "Teacher model",
+        )
+        _require_file(
+            vae_path,
+            "Wan VAE weights",
+        )
+
+    _require_file(
+        wav2vec_dir / "config.json",
+        "Wav2Vec config",
+    )
+    _require_weights(
+        wav2vec_dir,
+        "Wav2Vec",
+    )
+
+    logger.info(
+        "SoulX model configuration validated; "
+        "model_type={}; checkpoint_dir={}; "
+        "wav2vec_dir={}; config_path={}",
+        model_type,
+        checkpoint_dir,
+        wav2vec_dir,
+        config_path,
+    )
+
+    return (
+        checkpoint_dir,
+        wav2vec_dir,
+        config_path,
+        model_type,
+    )
 
 def _dump_job(job: LipSyncJob) -> dict:
     """
@@ -45,26 +324,25 @@ def _get_model() -> SoulXModel:
     """
 
     global _model
+
     if _model is not None:
-      return _model
-    
+        return _model
+
+    (
+        checkpoint_dir,
+        wav2vec_dir,
+        config_path,
+        model_type,
+    ) = validate_model_configuration()
 
     _model = SoulXModel(
-      cpkt_dir=os.getenv(
-          "SOULX_CKPT_DIR",
-          str(SOULX_DIR / "models" / "SoulX-FlashHead-1_3B"),
-      ),
-      wav2vec_dir=os.getenv(
-          "SOULX_WAV2VEC_DIR",
-          str(SOULX_DIR / "models" / "wav2vec2-base-960h"),
-      ),
-      model_type=os.getenv("SOULX_MODEL_TYPE", "lite"),
-      config_path=os.getenv(
-          "SOULX_CONFIG_PATH",
-          str(SOULX_DIR / "flash_head" / "configs" / "infer_params.yaml"),
-      ),
-      world_size=int(os.getenv("WORLD_SIZE", "1")),
+        cpkt_dir=str(checkpoint_dir),
+        wav2vec_dir=str(wav2vec_dir),
+        model_type=model_type,
+        config_path=str(config_path),
+        world_size=int(os.getenv("WORLD_SIZE", "1")),
     )
+
     return _model
 
 @celery_app.task(name="process_lipsync_task", bind=True, max_retries=2)
@@ -130,16 +408,27 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
         job.job_id,
       )
 
+      use_face_crop = (
+        os.getenv("USE_FACE_CROP", "false")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+      ) 
       model.generate_video(
         Path(image_path),
         Path(audio_path),
         output_path=output_path,
         seed=int(os.getenv("SEED", 42)),
-        use_face_crop=os.getenv("USE_FACE_CROP", default=False)
+        use_face_crop=use_face_crop
       )
 
-      if not output_path.exists():
-        raise RuntimeError("Output video was not created")
+      if (
+          not output_path.is_file()
+          or output_path.stat().st_size == 0
+      ):
+          raise RuntimeError(
+              "Output video was not created or is empty"
+          )
       
       logger.info(
         "LipSync generate_video completed job_id={} output_path={} output_size={} elapsed_sec={:.2f}",
@@ -149,6 +438,7 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
         time() - started,
       )
 
+      _delete_job_audio(audio_path)
 
     except Exception as exc:
       will_retry = self.request.retries < self.max_retries
@@ -168,11 +458,13 @@ def processing_lipsync_task(self, job_payload:dict) -> dict:
 
       if will_retry:
         job.status = "retry"
-        self.update_state(state="PROGRESS", meta=_dump_job(job))
-        raise self.retry(exc=exc, countdown=10 * job.attempts)
+        self.update_state(state="PROGRESS", 
+                          meta=_dump_job(job))
+        raise self.retry(exc=exc, 
+                         countdown=10 * job.attempts)
 
       job.status = "failed"
-      return _dump_job(job)
+      raise
 
     job.status = "completed"
     job.completed_at = time()
