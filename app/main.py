@@ -28,6 +28,15 @@ configure_loguru(str("api/lipsync_api.log"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+  """
+  Thiết lập và dọn dẹp tài nguyên trong vòng đời của FastAPI app.
+
+  Khi startup, hàm khởi tạo LipSyncService và lưu vào app.state.lipsync_service
+  để các endpoint có thể dùng chung. Khi shutdown, hàm ghi log kết thúc ứng dụng.
+
+  Tham số:
+    app: Instance FastAPI cần được cấu hình tài nguyên dùng chung.
+  """
   logger.info("Starting LipSync API...")
   storage_dir = Path(os.getenv("LIPSYNC_STORAGE_DIR", str(DEFAULT_STORAGE_DIR)))
 
