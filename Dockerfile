@@ -6,8 +6,10 @@ ARG PYTORCH_VERSION=2.5.1
 ARG TORCHVISION_VERSION=0.20.1
 ARG XFORMERS_VERSION=0.0.28.post3
 ARG PYTORCH_CUDA_INDEX=cu121
+ARG API_PORT
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+ENV API_PORT=${API_PORT} \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -63,9 +65,9 @@ RUN mkdir -p \
 
 VOLUME ["/opt/lipsync/storage", "/opt/lipsync/logs"]
 
-EXPOSE 8010
+EXPOSE ${API_PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3)" || exit 1
+    CMD python3 -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"API_PORT\"]}/health', timeout=3)" || exit 1
 
-CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+CMD ["sh", "-c", "exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port \"$API_PORT\""]

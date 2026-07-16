@@ -9,8 +9,10 @@ x-build-common: &build-common
     TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.20.1}
     XFORMERS_VERSION: ${XFORMERS_VERSION:-0.0.28.post3}
     PYTORCH_CUDA_INDEX: ${PYTORCH_CUDA_INDEX:-cu121}
+    API_PORT: ${API_PORT:-8071}
 
 x-app-environment: &app-environment
+  API_PORT: ${API_PORT:-8071}
   CELERY_BROKER_URL: redis://redis:6379/10
   CELERY_RESULT_BACKEND: redis://redis:6379/11
   LIPSYNC_STORAGE_DIR: /opt/lipsync/storage/lipsync
@@ -85,12 +87,17 @@ services:
 
   api:
     <<: *app-common
+    # environment:
+    #   <<: app-environment
+    #   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+    #   DOWNLOAD_URL_TTL_SECONDS: ${DOWNLOAD_URL_TTL_SECONDS:-300}
+    #   DOWNLOAD_URL_SECRET: ${DOWNLOAD_URL_SECRET}
     volumes: *api-volumes
     depends_on:
       redis:
         condition: service_healthy
     ports:
-      - "${API_PORT:-8010}:8010"
+      - "${API_PORT}:${API_PORT-8071}"
 
   worker-1:
     <<: *worker-common
@@ -115,28 +122,28 @@ services:
           --hostname=worker-1@%h \
           2>&1 | tee -a /opt/lipsync/logs/worker/worker-1-terminal.log
 
-  # worker-2:
-  #   <<: *worker-common
-  #   environment:
-  #     <<: *app-environment
-  #     CUDA_VISIBLE_DEVICES: "0"
-  #     NVIDIA_DRIVER_CAPABILITIES: compute,utility
-  #     WORKER_LOG_FILE: worker/worker-2-loguru.log
-  #   command:
-  #     - /bin/bash
-  #     - -lc
-  #     - |
-  #       set -o pipefail
-  #       mkdir -p /opt/lipsync/logs/worker
-  #       python3 -m celery \
-  #         -A app.worker.celery_app.celery_app \
-  #         worker \
-  #         --loglevel=info \
-  #         --pool=solo \
-  #         --concurrency=1 \
-  #         --prefetch-multiplier=1 \
-  #         --hostname=worker-2@%h \
-  #         2>&1 | tee -a /opt/lipsync/logs/worker/worker-2-terminal.log
+  worker-2:
+    <<: *worker-common
+    environment:
+      <<: *app-environment
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      WORKER_LOG_FILE: worker/worker-2-loguru.log
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -o pipefail
+        mkdir -p /opt/lipsync/logs/worker
+        python3 -m celery \
+          -A app.worker.celery_app.celery_app \
+          worker \
+          --loglevel=info \
+          --pool=solo \
+          --concurrency=1 \
+          --prefetch-multiplier=1 \
+          --hostname=worker-2@%h \
+          2>&1 | tee -a /opt/lipsync/logs/worker/worker-2-terminal.log
 
 volumes:
   redis-data:

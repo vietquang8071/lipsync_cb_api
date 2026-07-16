@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from celery import Celery
 from celery.signals import worker_process_init, setup_logging
 from app.logging_config import configure_loguru, configure_worker_logging

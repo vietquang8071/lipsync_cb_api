@@ -34,8 +34,13 @@ class LipSyncQueuedResponse(BaseModel):
     job_id: str
     task_id: str
     status: Literal["queued"] = "queued"
-    video_url: str
+    download_url_endpoint: str
 
+
+class LipSyncDownloadUrlResponse(BaseModel):
+    download_url: str
+    expires_at: int
+    expires_in: int
 
 
 GENERATE_ERROR_RESPONSES = {
