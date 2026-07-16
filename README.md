@@ -1,5 +1,7 @@
 # lipsync_cb_api
 ###  🔧 Installation
+#### 0. Git clone this repo
+
 #### 1. Create a Conda environment
 ```bash
 conda create -n flashhead python=3.10
@@ -9,7 +11,7 @@ conda activate flashhead
 ```bash
 pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
 ```
-If your NVIDIA driver only supports CUDA version 12.8, using this:
+If your NVIDIA driver only supports CUDA version lower than 12.8, using this:
 ```bash
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 ```
@@ -18,6 +20,7 @@ To check CUDA, using this command:
  ```bash
  nvidia-smi
  ```
+
 #### 3. Install other dependencies
 ```bash
 pip install -r requirements.txt
@@ -74,5 +77,39 @@ app/thirdparty/SoulX_FlashHead/models/
 pip install "huggingface_hub[cli]"
 huggingface-cli download Soul-AILab/SoulX-FlashHead-1_3B --local-dir ./models/SoulX-FlashHead-1_3B
 huggingface-cli download facebook/wav2vec2-base-960h --local-dir ./models/wav2vec2-base-960h
+```
 
+### For docker using (Make sure that you have docker on your machine/server):
 
+#### 1) Following above steps
+
+#### 2) Create a folder in /dev/shm/
+```bash
+sudo mkdir /dev/shm/audio
+```
+Also make sure that you have these folders in lipsync_cb_api:
+```bash
+/storage
+/images
+/logs
+```
+#### Then, grant read and write permissions to this directory.
+```bash
+sudo chmod 777 /dev/shm/audio
+```
+
+#### 3) 
+```bash
+cd path/to/lipsync_cb_api
+```
+
+#### 4) Run build docker
+```bash
+docker compose build
+docker compose up
+```
+
+#### 5) To check container status
+```bash
+docker compose ps
+```
