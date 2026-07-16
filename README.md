@@ -21,7 +21,6 @@ To check CUDA, using this command:
 #### 3. Install other dependencies
 ```bash
 pip install -r requirements.txt
-pip install fastapi celery[redis]
 ```
 
 #### 4. FlashAttention installation:
