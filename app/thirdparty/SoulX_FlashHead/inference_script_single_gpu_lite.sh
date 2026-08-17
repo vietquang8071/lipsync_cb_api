@@ -1,9 +1,9 @@
-CUDA_VISIBLE_DEVICES=0
+CUDA_VISIBLE_DEVICES=1
 
-CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES python generate_video.py \
+CUDA_VISIBLE_DEVICES=1 python generate_video.py \
     --ckpt_dir models/SoulX-FlashHead-1_3B \
     --wav2vec_dir models/wav2vec2-base-960h \
     --model_type lite \
-    --cond_image examples/girl.png \
-    --audio_path examples/podcast_sichuan_16k.wav \
+    --cond_image /home/cbrain/ai_digital_hero/LipSync_CB/app/thirdparty/SoulX_FlashHead/examples/010.png \
+    --audio_path /home/cbrain/ai_digital_hero/LipSync_CB/app/thirdparty/SoulX_FlashHead/examples/female_test.mp3 \
     --audio_encode_mode stream
