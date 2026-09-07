@@ -113,3 +113,8 @@ docker compose up
 ```bash
 docker compose ps
 ```
+
+
+## API Documentation
+
+Please read 2 file **openapi.yaml** and **LipSync API Docs.pdf**
