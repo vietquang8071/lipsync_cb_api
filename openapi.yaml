@@ -1,0 +1,715 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+
+info:
+  title: LipSync API
+  summary: API tạo và tải video LipSync theo cơ chế xử lý bất đồng bộ
+  description: |
+    LipSync API nhận mã ảnh khuôn mặt và đường dẫn tệp âm thanh đã có trên
+    máy chủ, tạo một tác vụ Celery để sinh video, cung cấp endpoint theo dõi
+    trạng thái và cấp URL tải video có chữ ký với thời hạn ngắn.
+
+    Luồng sử dụng thông thường:
+
+    1. Gửi `POST /api/v1/lipsync/generate` để tạo job.
+    2. Dùng `task_id` để kiểm tra `GET /api/v1/lipsync/tasks/{task_id}`.
+    3. Khi task có state `SUCCESS`, gửi `POST
+       /api/v1/lipsync/jobs/{job_id}/download-url?task_id=...`.
+    4. Truy cập URL có chữ ký được trả về để tải tệp MP4.
+
+    `audio_path` là đường dẫn tệp phía máy chủ, không phải nội dung upload.
+  version: 0.1.0
+
+servers:
+  - url: /
+    description: Máy chủ hiện tại
+
+tags:
+  - name: Service
+    description: Thông tin và trạng thái sẵn sàng của API.
+  - name: LipSync
+    description: Tạo job, theo dõi task và tải video LipSync.
+
+paths:
+  /:
+    get:
+      tags:
+        - Service
+      operationId: getServiceInfo
+      summary: Lấy thông tin dịch vụ
+      description: Trả về tên dịch vụ, trạng thái chạy và đường dẫn Swagger UI.
+      responses:
+        '200':
+          description: Thông tin cơ bản của dịch vụ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+              example:
+                service: lipsync
+                status: running
+                docs: /docs
+
+  /health:
+    get:
+      tags:
+        - Service
+      operationId: getApiHealth
+      summary: Kiểm tra trạng thái sẵn sàng
+      description: |
+        Kiểm tra LipSync service đã được khởi tạo và thư mục lưu trữ job có
+        tồn tại hay chưa. Endpoint hiện luôn trả HTTP 200; trạng thái sẵn sàng
+        được thể hiện bằng trường `status` trong body.
+      responses:
+        '200':
+          description: Trạng thái sẵn sàng hiện tại của API.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ready:
+                  summary: API sẵn sàng
+                  value:
+                    status: ready
+                    component: api
+                notReady:
+                  summary: API chưa sẵn sàng
+                  value:
+                    status: not_ready
+                    component: api
+
+  /api/v1/lipsync/generate:
+    post:
+      tags:
+        - LipSync
+      operationId: queueLipSyncJob
+      summary: Đưa một job LipSync vào hàng đợi
+      description: |
+        Xác thực ảnh và tệp âm thanh phía máy chủ, tạo `job_id`, chuẩn bị thư
+        mục output và enqueue tác vụ Celery. Endpoint trả về ngay mà không chờ
+        video được tạo xong.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LipSyncPathRequest'
+            example:
+              image_id: avatar_001
+              audio_path: /dev/shm/audio/request-123.wav
+      responses:
+        '202':
+          description: Job đã được tạo và đưa vào hàng đợi Celery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LipSyncQueuedResponse'
+              example:
+                job_id: 7bc20a1f4a344e5a92d316a51797ab8f
+                task_id: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+                status: queued
+                download_url_endpoint: https://api.example.com/api/v1/lipsync/jobs/7bc20a1f4a344e5a92d316a51797ab8f/download-url
+          links:
+            GetTaskStatus:
+              operationId: getLipSyncTaskStatus
+              description: Kiểm tra trạng thái của task vừa được tạo.
+              parameters:
+                task_id: $response.body#/task_id
+            CreateDownloadUrl:
+              operationId: createLipSyncDownloadUrl
+              description: Cấp URL tải xuống sau khi task hoàn tất.
+              parameters:
+                job_id: $response.body#/job_id
+                task_id: $response.body#/task_id
+        '400':
+          description: |
+            `image_id` hoặc `audio_path` không hợp lệ, audio nằm ngoài
+            `AUDIO_STORAGE`, hoặc tệp audio rỗng.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidImageId:
+                  value:
+                    detail: Invalid image_id
+                audioOutsideStorage:
+                  value:
+                    detail: Audio path is outside AUDIO_STORAGE
+                emptyAudio:
+                  value:
+                    detail: Audio file is empty
+        '404':
+          description: Không tìm thấy ảnh ứng với `image_id` hoặc tệp audio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                imageNotFound:
+                  value:
+                    detail: 'Image not found for image_id: avatar_001'
+                audioNotFound:
+                  value:
+                    detail: 'Audio file not found: /dev/shm/audio/request-123.wav'
+        '415':
+          description: Định dạng audio không được hỗ trợ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: 'Unsupported audio type: .flac'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          description: Không thể enqueue job hoặc xảy ra lỗi máy chủ chưa được xử lý.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Failed to enqueue LipSync job.
+            text/plain:
+              schema:
+                type: string
+              example: Internal Server Error
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/lipsync/jobs/{job_id}/download-url:
+    post:
+      tags:
+        - LipSync
+      operationId: createLipSyncDownloadUrl
+      summary: Cấp URL tải video có chữ ký
+      description: |
+        Chỉ cấp URL khi task Celery đã có state `SUCCESS`, kết quả task thuộc
+        đúng `job_id`, và tệp `lipsync.mp4` tồn tại, không rỗng. URL được ký
+        bằng HMAC-SHA256 và có thời hạn cấu hình bởi
+        `DOWNLOAD_URL_TTL_SECONDS`.
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - $ref: '#/components/parameters/TaskIdQuery'
+      responses:
+        '200':
+          description: URL tải video có chữ ký đã được cấp.
+          headers:
+            Cache-Control:
+              description: Ngăn client và proxy lưu cache URL có chữ ký.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LipSyncDownloadUrlResponse'
+              example:
+                download_url: https://api.example.com/api/v1/lipsync/jobs/7bc20a1f4a344e5a92d316a51797ab8f/video?expires=1788500000&signature=4ba9dd75b49d8f38f5cf01589aab5f40b57d098064901885081a96a23fb13fa1
+                expires_at: 1788500000
+                expires_in: 300
+        '400':
+          $ref: '#/components/responses/InvalidJobId'
+        '403':
+          description: Task không thuộc job được yêu cầu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Task does not belong to this job
+        '404':
+          description: Không tìm thấy video hoặc tệp video rỗng.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: LipSync video not found
+        '409':
+          description: Task chưa hoàn tất thành công.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: LipSync task is not completed
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/lipsync/tasks/{task_id}:
+    get:
+      tags:
+        - LipSync
+      operationId: getLipSyncTaskStatus
+      summary: Lấy trạng thái task LipSync
+      description: |
+        Trả về state từ Celery result backend. Với task chưa biết hoặc chưa có
+        kết quả, Celery có thể trả `PENDING` và response không có `meta`.
+
+        Khi task đang xử lý hoặc đã thành công, `meta` là dữ liệu
+        `LipSyncJob`. Khi Celery trả một exception, endpoint chuyển exception
+        thành object lỗi. Task thất bại vẫn được biểu diễn trong response HTTP
+        200 thông qua `state` và `meta`.
+      parameters:
+        - $ref: '#/components/parameters/TaskIdPath'
+      responses:
+        '200':
+          description: Trạng thái Celery hiện tại và metadata nếu có.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LipSyncTaskStatusResponse'
+              examples:
+                pending:
+                  summary: Chưa có kết quả task
+                  value:
+                    task_id: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+                    state: PENDING
+                processing:
+                  summary: Task đang xử lý
+                  value:
+                    task_id: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+                    state: PROGRESS
+                    meta:
+                      job_id: 7bc20a1f4a344e5a92d316a51797ab8f
+                      status: processing
+                      image_path: /opt/lipsync/storage/images/avatar_001.jpg
+                      audio_path: /dev/shm/audio/request-123.wav
+                      output_path: /opt/lipsync/storage/lipsync/7bc20a1f4a344e5a92d316a51797ab8f/lipsync.mp4
+                      attempts: 1
+                      max_attempts: 3
+                      error: null
+                      worker_id: worker-1:1234
+                      created_at: 1788499000.0
+                      updated_at: 1788499001.0
+                      started_at: 1788499001.0
+                      completed_at: null
+                failed:
+                  summary: Task thất bại
+                  value:
+                    task_id: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+                    state: FAILURE
+                    meta:
+                      status: failed
+                      error_type: RuntimeError
+                      error: Output video was not created or is empty
+
+  /api/v1/lipsync/jobs/{job_id}/video:
+    get:
+      tags:
+        - LipSync
+      operationId: downloadLipSyncVideo
+      summary: Tải video LipSync
+      description: |
+        Xác thực `job_id`, chữ ký HMAC-SHA256 và thời hạn URL, sau đó trả tệp
+        `lipsync.mp4`. Chữ ký được tính từ chuỗi
+        `lipsync-video:{job_id}:{expires}` với `DOWNLOAD_URL_SECRET`.
+      parameters:
+        - $ref: '#/components/parameters/JobIdPath'
+        - name: expires
+          in: query
+          required: true
+          description: Thời điểm URL hết hạn, dạng Unix timestamp theo giây.
+          schema:
+            type: integer
+            format: int64
+            exclusiveMinimum: 0
+          example: 1788500000
+        - name: signature
+          in: query
+          required: true
+          description: Chữ ký HMAC-SHA256 ở dạng chuỗi hexadecimal 64 ký tự.
+          schema:
+            type: string
+            minLength: 64
+            maxLength: 64
+          example: 4ba9dd75b49d8f38f5cf01589aab5f40b57d098064901885081a96a23fb13fa1
+      responses:
+        '200':
+          description: Tệp video LipSync đã được tạo.
+          headers:
+            Cache-Control:
+              description: Chính sách cache của video tải qua URL có chữ ký.
+              schema:
+                type: string
+                const: private, no-store
+            Content-Disposition:
+              description: Tên tệp tải xuống do FileResponse tạo.
+              schema:
+                type: string
+              example: 'attachment; filename="lipsync-7bc20a1f4a344e5a92d316a51797ab8f.mp4"'
+          content:
+            video/mp4: {}
+        '400':
+          $ref: '#/components/responses/InvalidJobId'
+        '403':
+          description: Chữ ký tải xuống không hợp lệ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Invalid download signature
+        '404':
+          description: Video không tồn tại, rỗng hoặc chưa hoàn tất.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: LipSync video not found or not completed
+        '410':
+          description: URL tải xuống đã hết hạn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: Download URL has expired
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  parameters:
+    JobIdPath:
+      name: job_id
+      in: path
+      required: true
+      description: |
+        Mã job do endpoint generate tạo. Giá trị được sinh từ `uuid4().hex`
+        và có 32 ký tự hexadecimal viết thường.
+      schema:
+        $ref: '#/components/schemas/JobId'
+      example: 7bc20a1f4a344e5a92d316a51797ab8f
+
+    TaskIdPath:
+      name: task_id
+      in: path
+      required: true
+      description: Mã task do Celery trả về khi enqueue job.
+      schema:
+        type: string
+      example: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+
+    TaskIdQuery:
+      name: task_id
+      in: query
+      required: true
+      description: Mã task Celery được trả về cùng `job_id` khi tạo job.
+      schema:
+        type: string
+      example: 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+
+  responses:
+    InvalidJobId:
+      description: "`job_id` không hợp lệ."
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: Invalid job id
+
+    ServiceUnavailable:
+      description: LipSync service chưa được khởi tạo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: LipSync service is not initialized.
+
+    ValidationError:
+      description: Request không vượt qua validation của FastAPI/Pydantic.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HTTPValidationError'
+
+  schemas:
+    ServiceInfo:
+      type: object
+      additionalProperties: false
+      required:
+        - service
+        - status
+        - docs
+      properties:
+        service:
+          type: string
+          const: lipsync
+          description: Tên dịch vụ.
+        status:
+          type: string
+          const: running
+          description: Trạng thái process API.
+        docs:
+          type: string
+          description: Đường dẫn tương đối tới Swagger UI.
+          examples:
+            - /docs
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - component
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - not_ready
+          description: Trạng thái sẵn sàng của LipSync service.
+        component:
+          type: string
+          const: api
+
+    JobId:
+      type: string
+      minLength: 32
+      maxLength: 32
+      pattern: '^[0-9a-f]{32}$'
+      description: Mã job được sinh bởi `uuid4().hex`.
+      examples:
+        - 7bc20a1f4a344e5a92d316a51797ab8f
+
+    LipSyncPathRequest:
+      type: object
+      required:
+        - image_id
+        - audio_path
+      properties:
+        image_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: |
+            ID của ảnh khuôn mặt. Server tìm tệp có ID này trong
+            `IMAGE_STORAGE` với một trong các đuôi `.jpg`, `.jpeg`, `.png`.
+          examples:
+            - avatar_001
+        audio_path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: |
+            Đường dẫn tệp audio phía máy chủ. Sau khi resolve, đường dẫn phải
+            nằm trong `AUDIO_STORAGE`; các đuôi được hỗ trợ là `.wav`, `.mp3`
+            và `.m4a`. Tệp phải tồn tại và không được rỗng. Worker sẽ xóa audio sau khi job thành công. File audio phải được lấy trong thư mục /dev/shm/audio để tối ưu I/O. Không sử dụng cùng 1 audio_path cho nhiều job đồng thời
+          examples:
+            - /dev/shm/audio/request-123.wav
+
+    LipSyncQueuedResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - job_id
+        - task_id
+        - status
+        - download_url_endpoint
+      properties:
+        job_id:
+          $ref: '#/components/schemas/JobId'
+        task_id:
+          type: string
+          description: Mã task do Celery tạo.
+          examples:
+            - 0e3f26bf-9c65-4c6a-a4ba-11f43918d40a
+        status:
+          type: string
+          const: queued
+        download_url_endpoint:
+          type: string
+          format: uri
+          description: |
+            URL endpoint dùng để yêu cầu URL tải xuống. Client vẫn phải gửi
+            `task_id` dưới dạng query parameter khi gọi endpoint này.
+
+    LipSyncDownloadUrlResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - download_url
+        - expires_at
+        - expires_in
+      properties:
+        download_url:
+          type: string
+          format: uri
+          description: URL có chữ ký dùng để tải video MP4.
+        expires_at:
+          type: integer
+          format: int64
+          description: Thời điểm URL hết hạn, dạng Unix timestamp theo giây.
+        expires_in:
+          type: integer
+          minimum: 1
+          description: Thời gian hiệu lực của URL tính bằng giây.
+
+    LipSyncTaskStatusResponse:
+      type: object
+      required:
+        - task_id
+        - state
+      properties:
+        task_id:
+          type: string
+          description: Mã task Celery được truy vấn.
+        state:
+          type: string
+          description: |
+            State hiện tại do Celery result backend trả về. Các giá trị thường gặp với task này gồm `PENDING`, `PROGRESS`, `SUCCESS`, `RETRY` và `FAILURE`.
+          examples:
+            - PENDING
+            - PROGRESS
+            - SUCCESS
+            - RETRY
+            - FAILURE
+        meta:
+          description: |
+            Metadata job khi task đang xử lý/đã thành công, hoặc thông tin lỗi khi Celery trả về một exception. Trường này không xuất hiện khi
+            `result.info` là `None`.
+          anyOf:
+            - $ref: '#/components/schemas/LipSyncJobMeta'
+            - $ref: '#/components/schemas/LipSyncTaskErrorMeta'
+
+    LipSyncJobMeta:
+      type: object
+      additionalProperties: false
+      description: |
+        Dữ liệu `LipSyncJob` hiện được worker lưu làm Celery metadata và được
+        endpoint task status trả trực tiếp. Các trường đường dẫn và worker ID
+        là thông tin nội bộ nhưng vẫn có trong response của code hiện tại.
+      required:
+        - job_id
+        - status
+        - image_path
+        - audio_path
+        - output_path
+        - attempts
+        - max_attempts
+        - error
+        - worker_id
+        - created_at
+        - updated_at
+        - started_at
+        - completed_at
+      properties:
+        job_id:
+          $ref: '#/components/schemas/JobId'
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - completed
+            - failed
+            - retry
+        image_path:
+          type: string
+          description: Đường dẫn tuyệt đối của ảnh đầu vào trên máy chủ.
+        audio_path:
+          type: string
+          description: Đường dẫn tuyệt đối của audio đầu vào trên máy chủ.
+        output_path:
+          type: string
+          description: Đường dẫn tuyệt đối dự kiến của video output.
+        attempts:
+          type: integer
+          minimum: 0
+        max_attempts:
+          type: integer
+          minimum: 1
+        error:
+          type:
+            - string
+            - 'null'
+        worker_id:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: number
+          format: double
+          description: Unix timestamp theo giây.
+        updated_at:
+          type: number
+          format: double
+          description: Unix timestamp theo giây.
+        started_at:
+          type:
+            - number
+            - 'null'
+          format: double
+          description: Unix timestamp theo giây hoặc null.
+        completed_at:
+          type:
+            - number
+            - 'null'
+          format: double
+          description: Unix timestamp theo giây hoặc null.
+
+    LipSyncTaskErrorMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - error_type
+        - error
+      properties:
+        status:
+          type: string
+          enum:
+            - failed
+            - retry
+        error_type:
+          type: string
+          description: Tên class của exception.
+        error:
+          type: string
+          description: Chuỗi biểu diễn exception.
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Mô tả lỗi.
+
+    HTTPValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+
+    ValidationErrorItem:
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      properties:
+        loc:
+          type: array
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string

@@ -73,8 +73,7 @@ Thumbs.db
 *.swp
 *.swo
 
-/images
 /scripts
 /test_voice
-openapi.yaml
+
 LipSync\ API\ Docs.pdf
